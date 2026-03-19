@@ -1,0 +1,12 @@
+node_modules
+.env
+dist
+uploads
+server/uploads
+package-lock.json
+client/package-lock.json
+server/package-lock.json
+*.png
+*.jpg
+*.jpeg
+*.gif
