@@ -1,9 +1,7 @@
 import OpenAI from "openai";
 import sql from "../configs/db.js";
 import { clerkClient, getAuth } from "@clerk/express";
-import axios from "axios";
 import { v2 as cloudinary } from "cloudinary";
-import fs from "fs";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
@@ -12,61 +10,22 @@ const AI = new OpenAI({
   baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
 });
 
+// Reusable Cloudinary upload helper
+const uploadToCloudinary = (buffer, options = {}) =>
+  new Promise((resolve, reject) => {
+    cloudinary.uploader
+      .upload_stream(options, (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      })
+      .end(buffer);
+  });
+
 export const generateArticle = async (req, res) => {
   try {
     const { userId } = getAuth(req);
     const { prompt, length } = req.body;
 
-    // plan and free_usage should come from Clerk metadata or your DB
-    const user = await clerkClient.users.getUser(userId);
-    const plan = user.privateMetadata.plan || "free";
-    const free_usage = user.privateMetadata.free_usage || 0;
-
-    if (plan !== "premium" && free_usage > 10) {
-      return res.json({
-        success: false,
-        message:
-          "You have reached the free usage limit. Please upgrade to premium.",
-      });
-    }
-
-    const response = await AI.chat.completions.create({
-      model: "gemini-2.5-flash",
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: length,
-    });
-
-    const content = response.choices[0].message.content;
-
-    await sql`INSERT INTO creations (user_id, prompt, content, type) VALUES (${userId}, ${prompt}, ${content}, ${"article"} )`;
-
-    if (plan !== "premium") {
-      await clerkClient.users.updateUserMetadata(userId, {
-        privateMetadata: {
-          free_usage: free_usage + 1,
-        },
-      });
-    }
-
-    res.json({ success: true, content });
-  } catch (error) {
-    console.log(error.message);
-    res.json({ success: false, message: error.message });
-  }
-};
-
-export const generateBlogTitle = async (req, res) => {
-  try {
-    const { userId } = getAuth(req);
-    const { prompt } = req.body;
-
-    // plan and free_usage should come from Clerk metadata or your DB
     const user = await clerkClient.users.getUser(userId);
     const plan = user.privateMetadata.plan || "free";
     const free_usage = user.privateMetadata.free_usage || 0;
@@ -83,17 +42,57 @@ export const generateBlogTitle = async (req, res) => {
       model: "gemini-2.5-flash",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
-      max_tokens: 2000, // increase from 100 to 1000
+      max_tokens: length,
     });
+
     const content = response.choices[0].message.content;
 
-    await sql`INSERT INTO creations (user_id, prompt, content, type) VALUES (${userId}, ${prompt}, ${content}, ${"blog-title"} )`;
+    await sql`INSERT INTO creations (user_id, prompt, content, type) VALUES (${userId}, ${prompt}, ${content}, ${"article"})`;
 
     if (plan !== "premium") {
       await clerkClient.users.updateUserMetadata(userId, {
-        privateMetadata: {
-          free_usage: free_usage + 1,
-        },
+        privateMetadata: { free_usage: free_usage + 1 },
+      });
+    }
+
+    res.json({ success: true, content });
+  } catch (error) {
+    console.log(error.message);
+    res.json({ success: false, message: error.message });
+  }
+};
+
+export const generateBlogTitle = async (req, res) => {
+  try {
+    const { userId } = getAuth(req);
+    const { prompt } = req.body;
+
+    const user = await clerkClient.users.getUser(userId);
+    const plan = user.privateMetadata.plan || "free";
+    const free_usage = user.privateMetadata.free_usage || 0;
+
+    if (plan !== "premium" && free_usage > 10) {
+      return res.json({
+        success: false,
+        message:
+          "You have reached the free usage limit. Please upgrade to premium.",
+      });
+    }
+
+    const response = await AI.chat.completions.create({
+      model: "gemini-2.5-flash",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_tokens: 2000,
+    });
+
+    const content = response.choices[0].message.content;
+
+    await sql`INSERT INTO creations (user_id, prompt, content, type) VALUES (${userId}, ${prompt}, ${content}, ${"blog-title"})`;
+
+    if (plan !== "premium") {
+      await clerkClient.users.updateUserMetadata(userId, {
+        privateMetadata: { free_usage: free_usage + 1 },
       });
     }
 
@@ -135,7 +134,6 @@ export const generateImage = async (req, res) => {
     const arrayBuffer = await response.arrayBuffer();
     const data = Buffer.from(arrayBuffer);
 
-    // Check if HuggingFace returned an error instead of an image
     const responseText = data.toString("utf-8");
     if (responseText.includes("error")) {
       return res.json({ success: false, message: responseText });
@@ -156,7 +154,6 @@ export const generateImage = async (req, res) => {
 export const removeImageBackground = async (req, res) => {
   try {
     const { userId } = getAuth(req);
-    const image = req.file;
 
     const user = await clerkClient.users.getUser(userId);
     const plan = user.privateMetadata.plan || "free";
@@ -168,13 +165,8 @@ export const removeImageBackground = async (req, res) => {
       });
     }
 
-    const { secure_url } = await cloudinary.uploader.upload(image.path, {
-      transformation: [
-        {
-          effect: "background_removal",
-          transformation: [{ effect: "e_background_removal" }],
-        },
-      ],
+    const { secure_url } = await uploadToCloudinary(req.file.buffer, {
+      transformation: [{ effect: "e_background_removal" }],
     });
 
     await sql`INSERT INTO creations (user_id, prompt, content, type) VALUES (${userId}, ${"Remove background from image"}, ${secure_url}, ${"image"})`;
@@ -189,7 +181,6 @@ export const removeImageBackground = async (req, res) => {
 export const removeImageObject = async (req, res) => {
   try {
     const { userId } = getAuth(req);
-    const image = req.file;
     const { object } = req.body;
 
     const user = await clerkClient.users.getUser(userId);
@@ -202,12 +193,10 @@ export const removeImageObject = async (req, res) => {
       });
     }
 
-    const { public_id } = await cloudinary.uploader.upload(image.path);
+    const { public_id } = await uploadToCloudinary(req.file.buffer);
 
     const ImageUrl = cloudinary.url(public_id, {
-      transformation: [
-        { effect: `gen_remove:${object}`, resource_type: "image" },
-      ],
+      transformation: [{ effect: `gen_remove:${object}` }],
     });
 
     await sql`INSERT INTO creations (user_id, prompt, content, type) VALUES (${userId}, ${`Remove ${object} from image`}, ${ImageUrl}, ${"image"})`;
@@ -241,7 +230,7 @@ export const reviewResume = async (req, res) => {
       });
     }
 
-    const dataBuffer = fs.readFileSync(resume.path);
+    const dataBuffer = req.file.buffer;
 
     const pdfText = await new Promise((resolve, reject) => {
       const PDFParser = require("pdf2json");
@@ -257,11 +246,12 @@ export const reviewResume = async (req, res) => {
     });
 
     const prompt = `Review the following resume and provide detailed feedback on its quality, writing style, and overall effectiveness. Resume Content:\n\n${pdfText}`;
+
     const response = await AI.chat.completions.create({
       model: "gemini-2.5-flash",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
-      max_tokens: 4000, // fixed: length -> 4000
+      max_tokens: 4000,
     });
 
     const content = response.choices[0].message.content;
