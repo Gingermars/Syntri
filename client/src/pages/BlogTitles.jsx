@@ -109,7 +109,7 @@ const BlogTitles = () => {
         </button>
         <br />
       </form>
-      {/* Right col */}
+      {/* Right col for display*/}
       <div className="w-full max-w-lg p-4 bg-black rounded-lg flex flex-col border border-gray-500 min-h-96 max-h-[400px]">
         <div className="flex items-center gap-3 mb-3">
           <Hash className="w-6 h-5 text-[#8800ff]" />
