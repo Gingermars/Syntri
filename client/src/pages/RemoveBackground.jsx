@@ -15,12 +15,11 @@ const RemoveBackground = () => {
 
   const onSubmitHandler = async (e) => {
     e.preventDefault();
-    // Add your submission logic here
     try {
       setLoading(true);
 
       const formData = new FormData();
-      formData.append("image", input);
+      formData.append("image", input); // use input state, not e.target.files[0]
 
       const { data } = await axios.post("/api/ai/remove-background", formData, {
         headers: {

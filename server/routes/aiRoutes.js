@@ -8,10 +8,9 @@ import {
   removeImageObject,
   reviewResume,
 } from "../controllers/aiController.js";
-import multer from "multer";
+import { upload } from "../configs/multer.js";
 
 const aiRouter = express.Router();
-const upload = multer({ dest: "uploads/" });
 
 aiRouter.post("/generate-article", auth, generateArticle);
 aiRouter.post("/blog-title", auth, generateBlogTitle);

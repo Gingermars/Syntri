@@ -3,6 +3,7 @@ import sql from "../configs/db.js";
 import { clerkClient, getAuth } from "@clerk/express";
 import { v2 as cloudinary } from "cloudinary";
 import { createRequire } from "module";
+
 const require = createRequire(import.meta.url);
 
 const AI = new OpenAI({
@@ -165,9 +166,30 @@ export const removeImageBackground = async (req, res) => {
       });
     }
 
-    const { secure_url } = await uploadToCloudinary(req.file.buffer, {
-      transformation: [{ effect: "e_background_removal" }],
+    const FormData = require("form-data");
+    const axios = require("axios");
+
+    const formData = new FormData();
+    formData.append("image_file", req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
     });
+    formData.append("size", "auto");
+
+    const response = await axios.post(
+      "https://api.remove.bg/v1.0/removebg",
+      formData,
+      {
+        headers: {
+          "X-Api-Key": process.env.REMOVE_BG_API_KEY,
+          ...formData.getHeaders(),
+        },
+        responseType: "arraybuffer",
+      },
+    );
+
+    const base64 = `data:image/png;base64,${Buffer.from(response.data).toString("base64")}`;
+    const { secure_url } = await cloudinary.uploader.upload(base64);
 
     await sql`INSERT INTO creations (user_id, prompt, content, type) VALUES (${userId}, ${"Remove background from image"}, ${secure_url}, ${"image"})`;
 
