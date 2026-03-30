@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import axios from "axios";
 import { useAuth } from "@clerk/clerk-react";
 import toast from "react-hot-toast";
+import imageCompression from "browser-image-compression";
 
 axios.defaults.baseURL = import.meta.env.VITE_BASE_URL;
 
@@ -25,7 +26,13 @@ const RemoveObjects = () => {
       }
 
       const formData = new FormData();
-      formData.append("image", input);
+
+      const compressedFile = await imageCompression(input, {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1024,
+      });
+
+      formData.append("image", compressedFile); // use the compressed file
       formData.append("object", object);
 
       const { data } = await axios.post("/api/ai/remove-object", formData, {
