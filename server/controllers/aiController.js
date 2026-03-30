@@ -181,7 +181,7 @@ export const removeImageBackground = async (req, res) => {
       formData,
       {
         headers: {
-          "X-Api-Key": process.env.REMOVE_BG_API_KEY,
+          "X-Api-Key": console.log(process.env.REMOVE_BG_API_KEY),
           ...formData.getHeaders(),
         },
         responseType: "arraybuffer",
