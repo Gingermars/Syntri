@@ -5,7 +5,9 @@ import { useAuth } from "@clerk/clerk-react";
 import toast from "react-hot-toast";
 import imageCompression from "browser-image-compression";
 
-axios.defaults.baseURL = import.meta.env.VITE_BASE_URL;
+axios.defaults.baseURL =
+  import.meta.env.VITE_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin);
 
 const RemoveBackground = () => {
   const [input, setInput] = useState("");

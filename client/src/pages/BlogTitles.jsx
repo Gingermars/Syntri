@@ -5,7 +5,9 @@ import toast from "react-hot-toast";
 import Markdown from "react-markdown";
 import { useAuth } from "@clerk/clerk-react";
 
-axios.defaults.baseURL = import.meta.env.VITE_BASE_URL;
+axios.defaults.baseURL =
+  import.meta.env.VITE_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin);
 
 const BlogTitles = () => {
   const blogCategories = [

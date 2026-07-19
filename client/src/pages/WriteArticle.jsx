@@ -5,7 +5,9 @@ import { toast } from "react-hot-toast";
 import axios from "axios";
 import Markdown from "react-markdown";
 
-axios.defaults.baseURL = import.meta.env.VITE_BASE_URL;
+axios.defaults.baseURL =
+  import.meta.env.VITE_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin);
 
 const WriteArticle = () => {
   const { getToken } = useAuth();

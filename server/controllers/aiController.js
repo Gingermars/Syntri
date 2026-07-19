@@ -1,8 +1,9 @@
 import OpenAI from "openai";
 import sql from "../configs/db.js";
-import { clerkClient, getAuth } from "@clerk/express";
+import { clerkClient } from "@clerk/express";
 import { v2 as cloudinary } from "cloudinary";
 import { createRequire } from "module";
+import { InferenceClient } from "@huggingface/inference";
 
 const require = createRequire(import.meta.url);
 
@@ -11,7 +12,8 @@ const AI = new OpenAI({
   baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
 });
 
-// Reusable Cloudinary upload helper
+const hf = new InferenceClient(process.env.HUGGING_FACE_API_KEY);
+
 const uploadToCloudinary = (buffer, options = {}) =>
   new Promise((resolve, reject) => {
     cloudinary.uploader
@@ -22,14 +24,28 @@ const uploadToCloudinary = (buffer, options = {}) =>
       .end(buffer);
   });
 
+// The openai SDK sets a real .status on API errors (429, 400, etc.) —
+// more reliable than matching on error.message text.
+const isRateLimitError = (error) => error?.status === 429;
+
+const handleAIError = (res, error, context) => {
+  console.log(`[${context}]`, error.message);
+
+  if (isRateLimitError(error)) {
+    return res.status(429).json({
+      success: false,
+      message:
+        "You're generating content a little too quickly — please wait a moment and try again.",
+    });
+  }
+
+  res.json({ success: false, message: error.message });
+};
+
 export const generateArticle = async (req, res) => {
   try {
-    const { userId } = getAuth(req);
     const { prompt, length } = req.body;
-
-    const user = await clerkClient.users.getUser(userId);
-    const plan = user.privateMetadata.plan || "free";
-    const free_usage = user.privateMetadata.free_usage || 0;
+    const { userId, plan, free_usage } = req;
 
     if (plan !== "premium" && free_usage > 10) {
       return res.json({
@@ -58,19 +74,14 @@ export const generateArticle = async (req, res) => {
 
     res.json({ success: true, content });
   } catch (error) {
-    console.log(error.message);
-    res.json({ success: false, message: error.message });
+    handleAIError(res, error, "generateArticle");
   }
 };
 
 export const generateBlogTitle = async (req, res) => {
   try {
-    const { userId } = getAuth(req);
     const { prompt } = req.body;
-
-    const user = await clerkClient.users.getUser(userId);
-    const plan = user.privateMetadata.plan || "free";
-    const free_usage = user.privateMetadata.free_usage || 0;
+    const { userId, plan, free_usage } = req;
 
     if (plan !== "premium" && free_usage > 10) {
       return res.json({
@@ -99,18 +110,14 @@ export const generateBlogTitle = async (req, res) => {
 
     res.json({ success: true, content });
   } catch (error) {
-    console.log(error.message);
-    res.json({ success: false, message: error.message });
+    handleAIError(res, error, "generateBlogTitle");
   }
 };
 
 export const generateImage = async (req, res) => {
   try {
-    const { userId } = getAuth(req);
     const { prompt, publish } = req.body;
-
-    const user = await clerkClient.users.getUser(userId);
-    const plan = user.privateMetadata.plan || "free";
+    const { userId, plan } = req;
 
     if (plan !== "premium") {
       return res.json({
@@ -119,27 +126,16 @@ export const generateImage = async (req, res) => {
       });
     }
 
-    const response = await fetch(
-      "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.HUGGING_FACE_API_KEY}`,
-          "Content-Type": "application/json",
-          Accept: "image/png",
-        },
-        body: JSON.stringify({ inputs: prompt }),
-      },
-    );
+    const imageBlob = await hf.textToImage({
+      model: "black-forest-labs/FLUX.1-schnell",
+      inputs: prompt,
+      // No provider specified on purpose — Hugging Face auto-selects
+      // whichever backend currently serves this model, so a single
+      // provider going away (like hf-inference just did) won't break this.
+    });
 
-    const arrayBuffer = await response.arrayBuffer();
+    const arrayBuffer = await imageBlob.arrayBuffer();
     const data = Buffer.from(arrayBuffer);
-
-    const responseText = data.toString("utf-8");
-    if (responseText.includes("error")) {
-      return res.json({ success: false, message: responseText });
-    }
-
     const base64Image = `data:image/png;base64,${data.toString("base64")}`;
     const { secure_url } = await cloudinary.uploader.upload(base64Image);
 
@@ -154,10 +150,7 @@ export const generateImage = async (req, res) => {
 
 export const removeImageBackground = async (req, res) => {
   try {
-    const { userId } = getAuth(req);
-
-    const user = await clerkClient.users.getUser(userId);
-    const plan = user.privateMetadata.plan || "free";
+    const { userId, plan } = req;
 
     if (plan !== "premium") {
       return res.json({
@@ -181,7 +174,7 @@ export const removeImageBackground = async (req, res) => {
       formData,
       {
         headers: {
-          "X-Api-Key": console.log(process.env.REMOVE_BG_API_KEY),
+          "X-Api-Key": process.env.REMOVE_BG_API_KEY,
           ...formData.getHeaders(),
         },
         responseType: "arraybuffer",
@@ -202,11 +195,8 @@ export const removeImageBackground = async (req, res) => {
 
 export const removeImageObject = async (req, res) => {
   try {
-    const { userId } = getAuth(req);
     const { object } = req.body;
-
-    const user = await clerkClient.users.getUser(userId);
-    const plan = user.privateMetadata.plan || "free";
+    const { userId, plan } = req;
 
     if (plan !== "premium") {
       return res.json({
@@ -232,11 +222,8 @@ export const removeImageObject = async (req, res) => {
 
 export const reviewResume = async (req, res) => {
   try {
-    const { userId } = getAuth(req);
+    const { userId, plan } = req;
     const resume = req.file;
-
-    const user = await clerkClient.users.getUser(userId);
-    const plan = user.privateMetadata.plan || "free";
 
     if (plan !== "premium") {
       return res.json({
@@ -282,7 +269,6 @@ export const reviewResume = async (req, res) => {
 
     res.json({ success: true, content });
   } catch (error) {
-    console.log(error.message);
-    res.json({ success: false, message: error.message });
+    handleAIError(res, error, "reviewResume");
   }
 };
